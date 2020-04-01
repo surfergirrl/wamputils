@@ -1,0 +1,129 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+plugins {
+    id "java"
+    id "eclipse"
+    id "idea"
+    id "com.jfrog.artifactory" version "4.7.3"
+    id "maven-publish"
+}
+
+defaultTasks 'build'
+
+compileJava {
+    sourceCompatibility = 11
+    targetCompatibility = 11
+    options.compilerArgs += ['-Xlint:unchecked']
+    options.warnings = true
+}
+
+group = "net.iqaros"
+
+repositories {
+    maven { // The google mirror is less flaky than mavenCentral()
+        url "https://maven-central.storage-download.googleapis.com/repos/central/data/"
+    }
+    maven {
+        url 'https://artifactory.is.comhem.com/artifactory/libs-release'
+    }
+    mavenCentral()
+    maven {
+        url "https://repository.apache.org/content/groups/public"
+    }
+    mavenLocal()
+}
+
+configurations {
+    extraLibs
+}
+
+dependencies {
+ //   compile 'com.google.protobuf:protobuf-java:3.11.1'
+   // compile 'iqaros:iqaros-protobufs:1.5.48-0-HEAD'
+    compile 'net.iqaros:demarcation:0.0.5'
+	compile	'net.sourceforge.argo:argo:3.20'
+	compile 'com.comhem.lan.utils:utils:1.0.65' //76'
+    testCompile "junit:junit:4.12"
+	//providedCompile 'org.projectlombok:lombok:1.18.12'
+	compileOnly(
+		[group: "org.projectlombok", name:"lombok", version: "1.18.12"]
+	)
+	annotationProcessor(
+		[group: "org.projectlombok", name:"lombok", version: "1.18.12"]
+	)
+	compile(
+	// rest
+		[group: 'com.squareup.okhttp3', name: 'okhttp', version: '3.12.0'],		
+		//[group: 'javax.xml.bind', name: 'jaxb-api', version: '2.3.1'],
+		//[group: 'javax.ws.rs', name: 'javax.ws.rs-api', version: '2.1.1'],		
+	//wamp
+		[group: 'io.crossbar.autobahn', name: 'autobahn-java', version: '19.3.1']
+	)
+}
+
+jar {
+	manifest {
+		attributes("Main-Class": "net.iqaros.Main")
+	} 
+  /*  from {
+        configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
+    }*/
+}
+
+sourceSets {
+	main {
+		java {
+			srcDir 'src/main/java'
+		}
+	}
+	test {
+		java {
+			srcDir 'src/test/java'
+		}
+	}
+}
+/*
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifactId "demarcation"
+            from components.java
+        }
+    }
+}*/
+
+artifactory {
+    contextUrl = "${artifactory_contextUrl}"   //The base Artifactory URL if not overridden by the publisher/resolver
+    /*publish {
+        repository {
+            repoKey = 'libs-release-local'
+            username = System.getenv('AD_USER')  // The publisher user name
+            password = System.getenv('AD_PASSWORD') // The publisher password
+        }
+        defaults {
+            publications('mavenJava')
+        }
+    }*/
+    resolve {
+        repository {
+            repoKey = 'libs-release'
+        }
+    }
+}
