@@ -70,9 +70,7 @@ dependencies {
 	)
 	compile(
 	// rest
-		[group: 'com.squareup.okhttp3', name: 'okhttp', version: '3.12.0'],		
-		//[group: 'javax.xml.bind', name: 'jaxb-api', version: '2.3.1'],
-		//[group: 'javax.ws.rs', name: 'javax.ws.rs-api', version: '2.1.1'],		
+		[group: 'com.squareup.okhttp3', name: 'okhttp', version: '3.12.0'],			
 	//wamp
 		[group: 'io.crossbar.autobahn', name: 'autobahn-java', version: '19.3.1']
 	)

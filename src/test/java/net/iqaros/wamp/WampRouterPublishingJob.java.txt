@@ -1,0 +1,149 @@
+package net.iqaros.wamp;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+/*
+import com.comhem.oss.buffy.application.WampPublisher;
+import com.comhem.oss.buffy.kafka.CachedKafkaData;
+import com.comhem.oss.buffy.kafka.KafkaResult;
+import com.comhem.oss.buffy.kafka.OnKafkaDataReceivedListener;
+import com.comhem.oss.buffy.models.WifiData;
+import com.comhem.oss.buffy.util.LogstashJsonLogger;
+import com.comhem.oss.buffy.wamp.WampTopic;
+import com.comhem.oss.buffy.wamp.WampTopicWithData;
+import com.comhem.oss.buffy.wamp.WampUtil;
+import com.comhem.oss.buffy.wamp.core.WampArgs;
+import com.comhem.oss.buffy.wamp.core.WampKwArgs;
+import com.comhem.oss.buffy.wamp.core.WampWebSocketClient;*/
+
+import net.iqaros.util.LogstashJsonLogger;
+import net.iqaros.wamp.core.WampWebSocketClient;
+
+//TODO: separate cache from publishing job. for example put the cache on redis
+public class WampRouterPublishingJob implements Runnable { //TODO: WampClient {
+  private static final LogstashJsonLogger LOGGER = LogstashJsonLogger.of();
+
+ // private List<String> caches;
+  private int currentCache = 0;
+  private String realm;
+  private String wampRouterUrl;
+  private WampWebSocketClient wampWebSocketClient;
+
+  private CompletableFuture<Long> connection;
+
+  //scheduled job for publishing cached kafka data
+  public WampRouterPublishingJob(String wampRouterUrl, String realm) {
+    this.wampRouterUrl = wampRouterUrl;
+    this.realm = realm;
+    //this.caches = Arrays.asList(new CachedKafkaData(),new CachedKafkaData());
+  }
+
+
+  //@Override
+  public CompletableFuture<Long> openConnection() {
+    if (connection == null) {
+      wampWebSocketClient = new WampWebSocketClient();
+      connection = wampWebSocketClient.connect(wampRouterUrl,realm);
+    }
+    return connection;
+  }
+  
+  //@Override
+  public CompletableFuture<String> closeConnection() {
+    if (wampWebSocketClient != null && connection.isDone()) {
+      return wampWebSocketClient.disconnectFromWampRouter();
+    } else {
+      CompletableFuture<String> cf = new CompletableFuture<>();
+      cf.complete("was not open");
+      return cf;
+    }
+  }
+
+  private CompletableFuture<Long> publish(final String wampTopicAndSearchKey, Object jsonValue) {
+    LOGGER.log(Level.INFO,"WampCachePublisher.publish: " + wampTopicAndSearchKey);
+    CompletableFuture<Long> publishFuture = new CompletableFuture<> (); 
+    try {
+      WampKwArgs kwArgs = new WampKwArgs();
+      WampArgs wampArgs = new WampArgs(Arrays.asList(jsonValue).toString());
+      
+      if (wampTopicAndSearchKey.startsWith(WampTopic.WIFI.getTopic())) {
+        String wampTopicTemp = WampUtil.removeSemicolonsFromMacAddress(wampTopicAndSearchKey);
+        wampWebSocketClient.publish(wampTopicTemp, wampArgs, kwArgs).whenComplete((a,e) -> {
+          if (e != null) {
+            LOGGER.log(Level.WARNING,"Publish wifidata failed: " + wampTopicTemp + ", "+ e.getMessage());
+            publishFuture.complete(-1L);
+          } else {
+            publishFuture.complete(0L);
+          }
+        });
+      } else {
+        wampWebSocketClient.publish(wampTopicAndSearchKey, wampArgs, kwArgs).whenComplete((a,e) -> {
+          if (e != null) {
+            LOGGER.log(Level.WARNING,"Publish failed: " + wampTopicAndSearchKey + ", "+ e.getMessage());
+            publishFuture.complete(-1L);
+          } else {
+            publishFuture.complete(0L);
+          }
+        });
+      
+      }
+    } catch (Exception ex) {
+      LOGGER.log(Level.WARNING,"WampCachePublisher failed: " + wampTopicAndSearchKey + ", "+ ex.getMessage());
+      
+    }
+    return publishFuture;
+  }
+
+  @Override
+  public void run() {
+    long start = System.currentTimeMillis();
+    int printingCacheNr = currentCache;
+    if (currentCache == 0) {
+      currentCache = 1;
+    } else {
+      currentCache = 0;
+    }
+    CachedKafkaData printingCache = caches.get(printingCacheNr);
+    if (!printingCache.isEmpty()) {
+      openConnection().thenAccept( r -> {
+        LOGGER.log(Level.INFO,"running WampCachePublisher: cache.size=" + printingCache.size() + ", currentCache=" + currentCache + ", printingCacheNr=" + printingCacheNr);
+        printingCache.forEach(data -> {
+          transformAndPublish(data);
+        });
+        //TODO: only clear if publish was success and wait for all publishing to complete
+        LOGGER.log(Level.INFO,"done publishing cache: " + (System.currentTimeMillis() - start) + " ms");
+        printingCache.clear();
+        caches.get(printingCacheNr).clear();
+      });
+
+    }
+  }
+
+  private void transformAndPublish(WampTopicWithData data) {
+    try {
+      LOGGER.log(Level.INFO,"WampCachePublisher.transformAndPublish: " + data.getSearchKey());
+      //blocking call here, we wait for one publish to finish before next...
+      if (WampTopic.WIFI == data.getWampTopic()) {
+        //Transform string to wifiData:
+        WifiData wifiData = WifiData.parseKafka(data.getData().toString());
+        publish(data.getWampTopic().getTopic() + data.getSearchKey(), wifiData.toJsonString()).get(20,TimeUnit.SECONDS);
+      } else {
+        LOGGER.log(Level.WARNING,"WampCachePublisher: unknown topic/transformation, defaulting to everything");
+        publish(data.getWampTopic().getTopic() + data.getSearchKey(), data.getData().toString()).get(20,TimeUnit.SECONDS);
+      }
+    } catch (Exception ex) {
+      LOGGER.log(Level.WARNING,"WampCachePublisher: Exception in transformAndPublish: " + ex.getMessage() + ", data=" + data);
+    }
+  }
+
+ @Override
+  public void onKafkaDataEvent(WampTopic wampTopic, String searchKey, KafkaResult<String> kafkaData) {
+    LOGGER.log(Level.INFO, "WampCachePublisher: onKafkaDataEvent: " + wampTopic.getTopic() + searchKey);
+    addToCache(wampTopic, searchKey, kafkaData.getValue());
+  }
+
+
+}
